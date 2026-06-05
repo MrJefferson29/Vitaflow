@@ -1,7 +1,6 @@
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,15 +8,15 @@ import {
   TextInput,
   View,
 } from "react-native";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { useFocusEffect } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DateTimeField } from "@/components/ui/date-time-field";
 import { GlassCard } from "@/components/ui/glass-card";
 import { PrimaryButton } from "@/components/ui/primary-button";
 import { ScreenBackground } from "@/components/ui/screen-background";
 import { SectionHeader } from "@/components/ui/section-header";
 import { AppTheme } from "@/constants/theme";
+import { useTabScreenInsets } from "@/hooks/use-tab-screen-insets";
 import {
   defaultReminderDate,
   formatDisplayDate,
@@ -35,11 +34,10 @@ const STATUS_COLORS = {
 };
 
 export default function RemindersScreen() {
-  const insets = useSafeAreaInsets();
+  const { contentPaddingTop, contentPaddingBottom } = useTabScreenInsets();
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState(defaultReminderDate);
-  const [showPicker, setShowPicker] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,15 +63,6 @@ export default function RemindersScreen() {
       loadReminders();
     }, [loadReminders]),
   );
-
-  const onPickerChange = (_event: DateTimePickerEvent, selected?: Date) => {
-    if (Platform.OS === "android") {
-      setShowPicker(false);
-    }
-    if (selected) {
-      setDueDate(selected);
-    }
-  };
 
   const addReminder = async () => {
     if (!title.trim()) {
@@ -126,12 +115,10 @@ export default function RemindersScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
-          {
-            paddingTop: insets.top + (Platform.OS === "ios" ? 8 : 16),
-            paddingBottom: insets.bottom + 100,
-          },
+          { paddingTop: contentPaddingTop, paddingBottom: contentPaddingBottom },
         ]}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled">
         <SectionHeader
           title="Farm alerts"
           subtitle="Schedule irrigation, fertilizer, and harvest reminders."
@@ -166,24 +153,7 @@ export default function RemindersScreen() {
             placeholderTextColor={AppTheme.text.muted}
           />
           <Text style={styles.label}>Due date & time</Text>
-          <Pressable style={styles.dateButton} onPress={() => setShowPicker(true)}>
-            <Text style={styles.dateButtonText}>{formatDueDateInput(dueDate)}</Text>
-            <Text style={styles.dateButtonHint}>Tap to change</Text>
-          </Pressable>
-          {showPicker ? (
-            <DateTimePicker
-              value={dueDate}
-              mode="datetime"
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              onChange={onPickerChange}
-              minimumDate={new Date()}
-            />
-          ) : null}
-          {Platform.OS === "ios" && showPicker ? (
-            <Pressable style={styles.donePicker} onPress={() => setShowPicker(false)}>
-              <Text style={styles.donePickerText}>Done</Text>
-            </Pressable>
-          ) : null}
+          <DateTimeField value={dueDate} onChange={setDueDate} minimumDate={new Date()} />
           <PrimaryButton label={saving ? "Saving…" : "Save alert"} onPress={addReminder} disabled={saving} />
         </GlassCard>
 
@@ -268,7 +238,6 @@ const styles = StyleSheet.create({
   statusUrl: {
     fontSize: 11,
     color: AppTheme.text.muted,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
   cardEyebrow: {
     fontSize: 12,
@@ -288,41 +257,10 @@ const styles = StyleSheet.create({
     borderColor: AppTheme.glass.border,
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: Platform.OS === "ios" ? 12 : 10,
+    paddingVertical: 12,
     fontSize: 16,
     color: AppTheme.text.primary,
     backgroundColor: "rgba(0, 0, 0, 0.2)",
-  },
-  dateButton: {
-    borderWidth: 1,
-    borderColor: AppTheme.glass.borderStrong,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: "rgba(20, 184, 166, 0.12)",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  dateButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: AppTheme.text.primary,
-    fontVariant: ["tabular-nums"],
-  },
-  dateButtonHint: {
-    fontSize: 12,
-    color: AppTheme.text.muted,
-  },
-  donePicker: {
-    alignSelf: "flex-end",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  donePickerText: {
-    color: AppTheme.accent.teal,
-    fontWeight: "700",
-    fontSize: 16,
   },
   taskRow: {
     flexDirection: "row",

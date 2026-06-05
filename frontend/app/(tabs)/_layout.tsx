@@ -1,20 +1,36 @@
 import { BlurView } from "expo-blur";
-import { Tabs } from "expo-router";
+import { router, Tabs } from "expo-router";
 import { Platform, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { AppTheme } from "@/constants/theme";
 
+const TAB_BAR_BODY = 56;
+
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = TAB_BAR_BODY + insets.bottom;
+
   return (
     <Tabs
+      safeAreaInsets={{ top: insets.top, bottom: insets.bottom, left: insets.left, right: insets.right }}
       screenOptions={{
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarActiveTintColor: AppTheme.tabBar.active,
         tabBarInactiveTintColor: AppTheme.tabBar.inactive,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: {
+          position: "absolute",
+          height: tabBarHeight,
+          paddingTop: 8,
+          paddingBottom: insets.bottom,
+          borderTopWidth: 1,
+          borderTopColor: AppTheme.glass.border,
+          backgroundColor: Platform.OS === "ios" ? "transparent" : AppTheme.tabBar.background,
+          elevation: 0,
+        },
         tabBarLabelStyle: styles.tabLabel,
         tabBarBackground: () =>
           Platform.OS === "ios" ? (
@@ -36,12 +52,16 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="chat"
+        name="assistant"
+        listeners={{
+          tabPress: (e) => {
+            e.preventDefault();
+            router.push("/chat");
+          },
+        }}
         options={{
           title: "Assistant",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={26} name="leaf.fill" color={color} />
-          ),
+          tabBarIcon: ({ color }) => <IconSymbol size={26} name="leaf.fill" color={color} />,
         }}
       />
     </Tabs>
@@ -49,15 +69,6 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  tabBar: {
-    position: "absolute",
-    borderTopWidth: 1,
-    borderTopColor: AppTheme.glass.border,
-    backgroundColor: Platform.OS === "ios" ? "transparent" : AppTheme.tabBar.background,
-    height: Platform.OS === "ios" ? 88 : 64,
-    paddingTop: 8,
-    elevation: 0,
-  },
   tabLabel: {
     fontSize: 11,
     fontWeight: "600",

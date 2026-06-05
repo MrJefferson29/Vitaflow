@@ -3,7 +3,13 @@ export type IrrigationStatus = {
   sensorRaw: number | null;
   dryThresholdRaw: number | null;
   pumpOn: boolean;
-  lastSensorUpdate: string;
+  pumpAutoTriggered?: boolean;
+  pumpUpdatedAt?: string;
+  lastSensorUpdate: string | null;
+  sensorAgeSeconds?: number | null;
+  autoIrrigateEnabled?: boolean;
+  autoIrrigateMoistureMin?: number;
+  autoIrrigateMoistureMax?: number;
 };
 
 export type Reminder = {
@@ -16,10 +22,17 @@ export type Reminder = {
 export type HealthStatus = {
   ok: boolean;
   storage: "mongodb" | "json";
-  openAiConfigured: boolean;
+  aiConfigured: boolean;
+  aiProvider?: string;
+  aiModel?: string;
+  /** @deprecated use aiConfigured */
+  openAiConfigured?: boolean;
+  autoIrrigateEnabled?: boolean;
+  autoIrrigateMoistureMin?: number;
+  autoIrrigateMoistureMax?: number;
 };
 
-const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:5000").replace(/\/$/, "");
+const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? "https://irrigation-pzz4.onrender.com").replace(/\/$/, "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;

@@ -19,7 +19,7 @@ static const char* WIFI_SSID = "hope and jenner";
 static const char* WIFI_PASSWORD = "byhl6628";
 
 // ----- Backend (LAN IP of PC running `npm start` in /backend) -----
-static const char* BACKEND_HOST = "10.60.14.100";
+static const char* BACKEND_HOST = "https://irrigation-pzz4.onrender.com";
 static const uint16_t BACKEND_PORT = 5000;
 static const char* API_DEVICE_KEY = "change-me";  // same as ESP32_API_KEY in backend/.env
 

@@ -8,6 +8,8 @@ const morgan = require("morgan");
 const { connectDb, isDbConnected } = require("./db");
 const Reminder = require("./models/Reminder");
 const { parseDueDate } = require("./lib/dates");
+const { parseAutoIrrigateConfig, evaluateAutoPump } = require("./lib/auto-irrigate");
+const { generateGeminiReply, isGeminiConfigured, getGeminiConfig } = require("./lib/gemini");
 
 dotenv.config();
 
@@ -41,8 +43,9 @@ function defaultStore() {
     moistureLevel: 42,
     sensorRaw: null,
     pumpOn: false,
+    pumpAutoTriggered: false,
     pumpUpdatedAt: new Date().toISOString(),
-    lastSensorUpdate: new Date().toISOString(),
+    lastSensorUpdate: null,
     reminders: [],
   };
 }
@@ -142,6 +145,10 @@ function mergeAndNormalizeStore(parsed) {
   if (typeof store.pumpUpdatedAt !== "string") {
     store.pumpUpdatedAt = base.pumpUpdatedAt;
   }
+  store.pumpAutoTriggered = Boolean(store.pumpAutoTriggered);
+  if (store.lastSensorUpdate != null && typeof store.lastSensorUpdate !== "string") {
+    store.lastSensorUpdate = null;
+  }
   return store;
 }
 
@@ -166,10 +173,42 @@ function patchStoreFields(fields) {
     if (parsed !== undefined) {
       store.pumpOn = parsed;
       store.pumpUpdatedAt = new Date().toISOString();
+      store.pumpAutoTriggered = false;
     }
+  }
+  if (fields.pumpAutoTriggered !== undefined) {
+    store.pumpAutoTriggered = Boolean(fields.pumpAutoTriggered);
   }
   writeStore(store);
   return store;
+}
+
+function sensorAgeSeconds(lastSensorUpdate) {
+  if (!lastSensorUpdate) {
+    return null;
+  }
+  const ts = new Date(lastSensorUpdate).getTime();
+  if (Number.isNaN(ts)) {
+    return null;
+  }
+  return Math.max(0, Math.round((Date.now() - ts) / 1000));
+}
+
+function buildStatusPayload(store) {
+  const autoConfig = parseAutoIrrigateConfig();
+  return {
+    moistureLevel: store.moistureLevel,
+    sensorRaw: store.sensorRaw ?? null,
+    dryThresholdRaw: parseDryThresholdRaw(),
+    pumpOn: Boolean(store.pumpOn),
+    pumpAutoTriggered: Boolean(store.pumpAutoTriggered),
+    pumpUpdatedAt: store.pumpUpdatedAt ?? store.lastSensorUpdate,
+    lastSensorUpdate: store.lastSensorUpdate,
+    sensorAgeSeconds: sensorAgeSeconds(store.lastSensorUpdate),
+    autoIrrigateEnabled: autoConfig.enabled,
+    autoIrrigateMoistureMin: autoConfig.minMoisture,
+    autoIrrigateMoistureMax: autoConfig.maxMoisture,
+  };
 }
 
 function normalizeReminderRecord(record) {
@@ -260,52 +299,7 @@ async function deleteReminderRecord(id) {
 }
 
 async function generateAiReply(message) {
-  const openAiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!openAiKey) {
-    return "I can help with irrigation, soil moisture, pests, and fertilizer schedules. Add OPENAI_API_KEY in backend/.env for full AI responses.";
-  }
-
-  const model = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openAiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an expert agronomy assistant for small farms. Give concise, practical guidance on irrigation, soil moisture, crop care, pests, and fertilizer. Use bullet points when listing steps.",
-          },
-          { role: "user", content: message },
-        ],
-        max_tokens: 600,
-        temperature: 0.7,
-      }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      const apiMessage = data?.error?.message || `HTTP ${response.status}`;
-      console.error("[chat] OpenAI error:", apiMessage);
-      throw new Error(apiMessage);
-    }
-
-    const text = data.choices?.[0]?.message?.content?.trim();
-    if (text) {
-      return text;
-    }
-
-    return "I could not parse an AI response. Please try again.";
-  } catch (error) {
-    console.error("[chat] OpenAI request failed:", error.message);
-    return `AI service is temporarily unavailable (${error.message}). Check OPENAI_API_KEY and your network connection.`;
-  }
+  return generateGeminiReply(message);
 }
 
 app.use(cors());
@@ -314,15 +308,7 @@ app.use(morgan("dev"));
 
 app.get("/api/status", (_req, res) => {
   const store = readStore();
-  const dryThresholdRaw = parseDryThresholdRaw();
-  res.json({
-    moistureLevel: store.moistureLevel,
-    sensorRaw: store.sensorRaw ?? null,
-    dryThresholdRaw,
-    pumpOn: Boolean(store.pumpOn),
-    pumpUpdatedAt: store.pumpUpdatedAt ?? store.lastSensorUpdate,
-    lastSensorUpdate: store.lastSensorUpdate,
-  });
+  res.json(buildStatusPayload(store));
 });
 
 app.post("/api/pump", (req, res) => {
@@ -368,25 +354,42 @@ app.post("/api/sensor", (req, res) => {
     });
   }
 
+  const now = new Date().toISOString();
+  const current = readStore();
+  const auto = evaluateAutoPump(nextMoisture, Boolean(current.pumpOn));
+
   const store = patchStoreFields({
     moistureLevel: nextMoisture,
     sensorRaw: nextSensorRaw !== null ? nextSensorRaw : undefined,
-    lastSensorUpdate: new Date().toISOString(),
+    lastSensorUpdate: now,
+    pumpOn: auto.pumpOn,
+    pumpAutoTriggered: auto.autoTriggered,
   });
+
+  if (auto.autoTriggered) {
+    console.log(
+      `[auto-irrigate] moisture=${nextMoisture}% → pump ${auto.pumpOn ? "ON" : "OFF"} (min=${auto.config.minMoisture}, max=${auto.config.maxMoisture})`,
+    );
+  }
+
   return res.json({
     message: "Sensor reading updated.",
-    moistureLevel: store.moistureLevel,
-    sensorRaw: store.sensorRaw ?? null,
-    pumpOn: Boolean(store.pumpOn),
-    pumpUpdatedAt: store.pumpUpdatedAt,
+    ...buildStatusPayload(store),
   });
 });
 
 app.get("/api/health", (_req, res) => {
+  const autoConfig = parseAutoIrrigateConfig();
   res.json({
     ok: true,
     storage: isDbConnected() ? "mongodb" : "json",
-    openAiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+    aiConfigured: isGeminiConfigured(),
+    aiProvider: "gemini",
+    aiModel: getGeminiConfig().model,
+    openAiConfigured: isGeminiConfigured(),
+    autoIrrigateEnabled: autoConfig.enabled,
+    autoIrrigateMoistureMin: autoConfig.minMoisture,
+    autoIrrigateMoistureMax: autoConfig.maxMoisture,
   });
 });
 
@@ -476,7 +479,10 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Backend server listening on http://0.0.0.0:${PORT} (LAN: use this machine's IP)`);
     console.log(`Reminders storage: ${isDbConnected() ? "MongoDB" : "data/store.json"}`);
-    console.log(`OpenAI chat: ${process.env.OPENAI_API_KEY?.trim() ? "configured" : "not configured"}`);
+    const gemini = getGeminiConfig();
+    console.log(
+      `Gemini chat: ${gemini.apiKey ? `configured (${gemini.model})` : "not configured — set GEMINI_API_KEY"}`,
+    );
   });
 }
 
