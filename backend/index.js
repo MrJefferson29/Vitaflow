@@ -8,15 +8,26 @@ const morgan = require("morgan");
 const { connectDb, isDbConnected } = require("./db");
 const Reminder = require("./models/Reminder");
 const { parseDueDate } = require("./lib/dates");
-const { parseAutoIrrigateConfig, evaluateAutoPump } = require("./lib/auto-irrigate");
+const {
+  parseAutoIrrigateConfig,
+  resolvePumpFromAuto,
+  isPumpAutoSuppressed,
+  snoozeAutoUntil,
+  wasAutoIrrigationContext,
+} = require("./lib/auto-irrigate");
 const { generateGeminiReply, isGeminiConfigured, getGeminiConfig } = require("./lib/gemini");
+const {
+  ADC_MAX,
+  coerceSensorRaw,
+  normalizeSensorRaw,
+  moisturePercentFromSensorRaw,
+} = require("./lib/sensor");
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const ESP32_API_KEY = process.env.ESP32_API_KEY || "change-me";
-const ADC_MAX = 4095;
 
 const storePath = path.join(__dirname, "data", "store.json");
 
@@ -32,18 +43,13 @@ function parseDryThresholdRaw() {
   return n;
 }
 
-/** ESP32 ADC: higher reading = drier (typical capacitive probe). Map to moisture % (100 = wet). */
-function moisturePercentFromSensorRaw(sensorRaw) {
-  const clamped = Math.max(0, Math.min(ADC_MAX, sensorRaw));
-  return Math.round(((ADC_MAX - clamped) / ADC_MAX) * 100);
-}
-
 function defaultStore() {
   return {
     moistureLevel: 42,
     sensorRaw: null,
     pumpOn: false,
     pumpAutoTriggered: false,
+    pumpAutoSuppressedUntil: null,
     pumpUpdatedAt: new Date().toISOString(),
     lastSensorUpdate: null,
     reminders: [],
@@ -146,6 +152,12 @@ function mergeAndNormalizeStore(parsed) {
     store.pumpUpdatedAt = base.pumpUpdatedAt;
   }
   store.pumpAutoTriggered = Boolean(store.pumpAutoTriggered);
+  if (store.pumpAutoSuppressedUntil != null && typeof store.pumpAutoSuppressedUntil !== "string") {
+    store.pumpAutoSuppressedUntil = null;
+  }
+  if (store.pumpAutoSuppressedUntil && !isPumpAutoSuppressed(store)) {
+    store.pumpAutoSuppressedUntil = null;
+  }
   if (store.lastSensorUpdate != null && typeof store.lastSensorUpdate !== "string") {
     store.lastSensorUpdate = null;
   }
@@ -173,11 +185,13 @@ function patchStoreFields(fields) {
     if (parsed !== undefined) {
       store.pumpOn = parsed;
       store.pumpUpdatedAt = new Date().toISOString();
-      store.pumpAutoTriggered = false;
     }
   }
   if (fields.pumpAutoTriggered !== undefined) {
     store.pumpAutoTriggered = Boolean(fields.pumpAutoTriggered);
+  }
+  if (fields.pumpAutoSuppressedUntil !== undefined) {
+    store.pumpAutoSuppressedUntil = fields.pumpAutoSuppressedUntil;
   }
   writeStore(store);
   return store;
@@ -202,6 +216,8 @@ function buildStatusPayload(store) {
     dryThresholdRaw: parseDryThresholdRaw(),
     pumpOn: Boolean(store.pumpOn),
     pumpAutoTriggered: Boolean(store.pumpAutoTriggered),
+    pumpAutoSuppressedUntil: store.pumpAutoSuppressedUntil ?? null,
+    pumpAutoSnoozed: isPumpAutoSuppressed(store),
     pumpUpdatedAt: store.pumpUpdatedAt ?? store.lastSensorUpdate,
     lastSensorUpdate: store.lastSensorUpdate,
     sensorAgeSeconds: sensorAgeSeconds(store.lastSensorUpdate),
@@ -318,12 +334,32 @@ app.post("/api/pump", (req, res) => {
     return res.status(400).json({ message: "pumpOn must be true/false or 0/1." });
   }
 
-  const store = patchStoreFields({ pumpOn });
+  const before = readStore();
+  let patch = {
+    pumpOn,
+    pumpAutoTriggered: false,
+  };
+
+  if (!pumpOn && wasAutoIrrigationContext(before)) {
+    patch.pumpAutoSuppressedUntil = snoozeAutoUntil();
+    console.log("[pump] manual OFF — auto-irrigate snoozed for 90 minutes");
+  } else if (pumpOn) {
+    patch.pumpAutoSuppressedUntil = null;
+  } else {
+    patch.pumpAutoSuppressedUntil = null;
+  }
+
+  const store = patchStoreFields(patch);
   console.log(`[pump] set pumpOn=${pumpOn} (device should read via GET /api/status)`);
   return res.json({
-    message: `Pump turned ${pumpOn ? "ON" : "OFF"}.`,
+    message: pumpOn
+      ? "Pump turned ON."
+      : store.pumpAutoSuppressedUntil
+        ? "Pump turned OFF. Auto-irrigate paused for 90 minutes."
+        : "Pump turned OFF.",
     pumpOn: Boolean(store.pumpOn),
     pumpUpdatedAt: store.pumpUpdatedAt,
+    pumpAutoSuppressedUntil: store.pumpAutoSuppressedUntil ?? null,
   });
 });
 
@@ -337,26 +373,25 @@ app.post("/api/sensor", (req, res) => {
   let nextMoisture = null;
   let nextSensorRaw = null;
 
-  if (typeof sensorRaw === "number" && Number.isFinite(sensorRaw)) {
-    if (sensorRaw < 0 || sensorRaw > ADC_MAX) {
-      return res.status(400).json({ message: `sensorRaw must be between 0 and ${ADC_MAX} (ESP32 ADC).` });
-    }
-    nextSensorRaw = Math.round(sensorRaw);
+  const normalizedRaw = normalizeSensorRaw(sensorRaw);
+  if (normalizedRaw != null) {
+    nextSensorRaw = normalizedRaw;
     nextMoisture = moisturePercentFromSensorRaw(nextSensorRaw);
-  } else if (typeof moistureLevel === "number" && Number.isFinite(moistureLevel)) {
-    if (moistureLevel < 0 || moistureLevel > 100) {
+  } else if (coerceSensorRaw(moistureLevel) != null) {
+    const ml = coerceSensorRaw(moistureLevel);
+    if (ml < 0 || ml > 100) {
       return res.status(400).json({ message: "moistureLevel must be a number between 0 and 100." });
     }
-    nextMoisture = Math.round(moistureLevel);
+    nextMoisture = ml;
   } else {
     return res.status(400).json({
-      message: `Send sensorRaw (0–${ADC_MAX}, ESP32 GPIO34-style ADC) or moistureLevel (0–100). Pump state is only changed via POST /api/pump (app).`,
+      message: `Send sensorRaw (0–${ADC_MAX}, ESP32 GPIO34 ADC) or moistureLevel (0–100). Received sensorRaw=${JSON.stringify(sensorRaw)}`,
     });
   }
 
   const now = new Date().toISOString();
   const current = readStore();
-  const auto = evaluateAutoPump(nextMoisture, Boolean(current.pumpOn));
+  const auto = resolvePumpFromAuto(current, nextMoisture);
 
   const store = patchStoreFields({
     moistureLevel: nextMoisture,
@@ -364,7 +399,12 @@ app.post("/api/sensor", (req, res) => {
     lastSensorUpdate: now,
     pumpOn: auto.pumpOn,
     pumpAutoTriggered: auto.autoTriggered,
+    pumpAutoSuppressedUntil: isPumpAutoSuppressed(current) ? current.pumpAutoSuppressedUntil : null,
   });
+
+  console.log(
+    `[sensor] raw=${nextSensorRaw ?? "—"} moisture=${nextMoisture}% pump=${auto.pumpOn ? "ON" : "OFF"}${auto.suppressed ? " (auto snoozed)" : ""}`,
+  );
 
   if (auto.autoTriggered) {
     console.log(

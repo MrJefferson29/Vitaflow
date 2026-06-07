@@ -40,6 +40,16 @@ static bool lastServerPumpOn = false;
 static bool relayInitialized = false;
 static unsigned long lastServerOkMs = 0;
 
+static int readSensorAdc() {
+  long sum = 0;
+  const int samples = 20;
+  for (int i = 0; i < samples; i++) {
+    sum += analogRead(SENSOR_PIN);
+    delay(3);
+  }
+  return (int)(sum / samples);
+}
+
 static void applyRelayFromPumpOn(bool pumpOn) {
   const bool relayEnergized = INVERT_RELAY_VS_SERVER ? !pumpOn : pumpOn;
   const int level =
@@ -141,6 +151,7 @@ static bool httpPostSensor(int sensorRaw) {
   body["sensorRaw"] = sensorRaw;
   String json;
   serializeJson(body, json);
+  Serial.printf("POST /api/sensor ADC=%d json=%s\n", sensorRaw, json.c_str());
 
   const int code = http.POST(json);
   const String response = http.getString();
@@ -219,7 +230,11 @@ void setup() {
   delay(300);
 
   pinMode(RELAY_PIN, OUTPUT);
+  pinMode(SENSOR_PIN, INPUT);
   applyRelayFromPumpOn(false);
+
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
 
   wifiClient.setInsecure();
   wifiClient.setTimeout(HTTP_TIMEOUT_MS);
@@ -272,7 +287,7 @@ void loop() {
 
   if (now - lastSensorMs >= SENSOR_CYCLE_MS) {
     lastSensorMs = now;
-    const int sensorRaw = analogRead(SENSOR_PIN);
+    const int sensorRaw = readSensorAdc();
     if (postSensorWithRetries(sensorRaw)) {
       Serial.printf("Sensor OK ADC=%d  serverPumpOn=%s\n", sensorRaw,
                     lastServerPumpOn ? "true" : "false");

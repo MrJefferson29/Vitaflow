@@ -194,7 +194,17 @@ export default function DashboardScreen() {
                 />
                 <Text style={styles.pumpStatus}>{pumpOn ? "Running" : "Stopped"}</Text>
               </View>
-              {status?.pumpAutoTriggered ? (
+              {status?.pumpAutoSnoozed ? (
+                <Text style={styles.snoozeHint}>
+                  Auto-irrigate paused until{" "}
+                  {status.pumpAutoSuppressedUntil
+                    ? new Date(status.pumpAutoSuppressedUntil).toLocaleTimeString(undefined, {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : "—"}
+                </Text>
+              ) : status?.pumpAutoTriggered ? (
                 <Text style={styles.autoHint}>Auto-irrigation active (moisture below threshold)</Text>
               ) : null}
             </View>
@@ -327,6 +337,12 @@ const styles = StyleSheet.create({
   autoHint: {
     fontSize: 12,
     color: AppTheme.accent.teal,
+    marginTop: 4,
+    fontWeight: "600",
+  },
+  snoozeHint: {
+    fontSize: 12,
+    color: "#fbbf24",
     marginTop: 4,
     fontWeight: "600",
   },

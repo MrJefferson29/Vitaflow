@@ -4,6 +4,8 @@ export type IrrigationStatus = {
   dryThresholdRaw: number | null;
   pumpOn: boolean;
   pumpAutoTriggered?: boolean;
+  pumpAutoSuppressedUntil?: string | null;
+  pumpAutoSnoozed?: boolean;
   pumpUpdatedAt?: string;
   lastSensorUpdate: string | null;
   sensorAgeSeconds?: number | null;
