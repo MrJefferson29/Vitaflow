@@ -34,7 +34,7 @@ export type HealthStatus = {
   autoIrrigateMoistureMax?: number;
 };
 
-const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? "https://irrigation-pzz4.onrender.com").replace(/\/$/, "");
+import { API_BASE_URL } from "@/constants/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -47,7 +47,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch {
     throw new Error(
-      `Cannot reach the server at ${API_BASE_URL}. Start the backend and set EXPO_PUBLIC_API_URL in frontend/.env to your PC's LAN IP.`,
+      `Cannot reach ${API_BASE_URL}. Check mobile data/Wi-Fi (carrier portals block API traffic) or wait for Render cold start.`,
     );
   }
 

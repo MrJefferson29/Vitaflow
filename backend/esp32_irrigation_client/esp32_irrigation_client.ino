@@ -1,11 +1,11 @@
 /*
- * Smart Irrigation — ESP32 HTTPS client for Render (or any TLS backend).
+ * Smart Irrigation — ESP32 HTTPS client for Render.
  *
- * GET  /api/status  → pumpOn → relay
- * POST /api/sensor  → sensorRaw + x-device-key
+ *   GET  /api/health  → connectivity probe
+ *   GET  /api/status  → pumpOn → relay
+ *   POST /api/sensor  → { sensorRaw } + x-device-key
  *
- * HTTP -1 fix: fresh TLS session per request, NTP time, DNS 8.8.8.8, WiFi sleep off,
- * single-flight HTTP (no overlapping GET/POST on one SSL socket).
+ * API_DEVICE_KEY must match ESP32_API_KEY on Render.
  */
 
 #include <ArduinoJson.h>
@@ -16,16 +16,12 @@
 
 // ----- Wi-Fi -----
 static const char* WIFI_SSID = "Amana";
-static const char* WIFI_PASSWORD = "";  // set password if network is not open
+static const char* WIFI_PASSWORD = "";
 
-// ----- Backend -----
-// USE_LOCAL_HTTP=true: PC running "npm start" on the SAME Wi-Fi as the ESP32 (no TLS).
-// USE_LOCAL_HTTP=false: Render HTTPS (only if your network can reach onrender.com:443).
-static const bool USE_LOCAL_HTTP = true;
-static const char* BACKEND_HOST = "192.168.193.40";  // your PC LAN IP (ipconfig)
-static const uint16_t BACKEND_PORT = 5000;             // 5000 local, 443 for Render
-static const char* RENDER_HOST = "irrigation-pzz4.onrender.com";
-static const char* API_DEVICE_KEY = "change-me";  // must match ESP32_API_KEY in backend/.env
+// ----- Render backend (HTTPS only — never use plain HTTP on mobile hotspots) -----
+static const char* BACKEND_HOST = "irrigation-pzz4.onrender.com";
+static const uint16_t BACKEND_PORT = 443;
+static const char* API_DEVICE_KEY = "change-me";
 
 // ----- Hardware -----
 static const int SENSOR_PIN = 34;
@@ -33,11 +29,11 @@ static const int RELAY_PIN = 25;
 static const bool PUMP_ACTIVE_LOW = true;
 static const bool INVERT_RELAY_VS_SERVER = true;
 
-static const unsigned long PUMP_POLL_MS = 2000;
-static const unsigned long SENSOR_CYCLE_MS = 4000;
-static const uint16_t HTTP_TIMEOUT_MS = 25000;
-static const int HTTP_MAX_RETRIES = 4;
-static const int BOOT_SYNC_RETRIES = 10;
+static const unsigned long PUMP_POLL_MS = 2500;
+static const unsigned long SENSOR_CYCLE_MS = 5000;
+static const uint16_t HTTP_TIMEOUT_MS = 30000;
+static const int HTTP_MAX_RETRIES = 5;
+static const int BOOT_SYNC_RETRIES = 12;
 
 static unsigned long lastPumpPollMs = 0;
 static unsigned long lastSensorMs = 0;
@@ -84,6 +80,26 @@ static bool parseJsonPumpOn(JsonVariant v, bool* out) {
   return true;
 }
 
+static bool isCaptivePortal(int code, const String& body) {
+  if (code == 301 || code == 302 || code == 307) {
+    return true;
+  }
+  if (body.indexOf("recharge.orange") >= 0) {
+    return true;
+  }
+  if (body.indexOf("Captive Portal") >= 0 || body.indexOf("<html>") >= 0) {
+    return code != HTTP_CODE_OK && code != 201;
+  }
+  return false;
+}
+
+static void logCaptivePortalHint() {
+  Serial.println(
+      ">>> Mobile carrier captive portal detected (e.g. Orange recharge page).");
+  Serial.println(
+      ">>> Recharge mobile data OR use home Wi-Fi with internet — not HTTP to LAN.");
+}
+
 static bool ensureWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     return true;
@@ -114,37 +130,15 @@ static void logHttpError(const char* label, int code) {
   Serial.printf("%s failed HTTP %d", label, code);
   if (code == HTTPC_ERROR_CONNECTION_REFUSED) {
     Serial.print(" — connection refused");
-  } else if (code == HTTPC_ERROR_SEND_HEADER_FAILED) {
-    Serial.print(" — send header failed");
-  } else if (code == HTTPC_ERROR_SEND_PAYLOAD_FAILED) {
-    Serial.print(" — send payload failed");
-  } else if (code == HTTPC_ERROR_NOT_CONNECTED) {
-    Serial.print(" — not connected");
-  } else if (code == HTTPC_ERROR_CONNECTION_LOST) {
-    Serial.print(" — connection lost");
-  } else if (code == HTTPC_ERROR_NO_STREAM) {
-    Serial.print(" — no stream");
-  } else if (code == HTTPC_ERROR_NO_HTTP_SERVER) {
-    Serial.print(" — no HTTP server");
-  } else if (code == HTTPC_ERROR_TOO_LESS_RAM) {
-    Serial.print(" — out of RAM");
   } else if (code == HTTPC_ERROR_READ_TIMEOUT) {
     Serial.print(" — read timeout");
   } else if (code < 0) {
-    Serial.print(" — TLS/TCP error (no response reached server)");
+    Serial.print(" — TLS/TCP failed (check Wi-Fi internet, not LAN IP)");
   }
   Serial.printf(" heap=%u rssi=%d\n", ESP.getFreeHeap(), WiFi.RSSI());
 }
 
-static const char* activeBackendHost() {
-  return USE_LOCAL_HTTP ? BACKEND_HOST : RENDER_HOST;
-}
-
-static uint16_t activeBackendPort() {
-  return USE_LOCAL_HTTP ? BACKEND_PORT : 443;
-}
-
-/** One fresh client per request — reusing one SSL socket causes HTTP -1 on ESP32. */
+/** Fresh TLS socket per request — shared WiFiClientSecure causes HTTP -1 on ESP32. */
 static bool httpRequest(const char* method, const char* path, const char* jsonBody, int* outCode,
                         String* outPayload) {
   if (httpBusy) {
@@ -157,24 +151,12 @@ static bool httpRequest(const char* method, const char* path, const char* jsonBo
     return false;
   }
 
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(HTTP_TIMEOUT_MS);
+
   HTTPClient http;
-  WiFiClient plainClient;
-  WiFiClientSecure secureClient;
-  const char* host = activeBackendHost();
-  const uint16_t port = activeBackendPort();
-  const bool isHttps = !USE_LOCAL_HTTP;
-  bool begun = false;
-
-  if (USE_LOCAL_HTTP) {
-    plainClient.setTimeout(HTTP_TIMEOUT_MS);
-    begun = http.begin(plainClient, host, port, path);
-  } else {
-    secureClient.setInsecure();
-    secureClient.setTimeout(HTTP_TIMEOUT_MS);
-    begun = http.begin(secureClient, host, port, path, true);
-  }
-
-  if (!begun) {
+  if (!http.begin(client, BACKEND_HOST, BACKEND_PORT, path, true)) {
     Serial.printf("%s %s: http.begin failed\n", method, path);
     httpBusy = false;
     return false;
@@ -183,7 +165,8 @@ static bool httpRequest(const char* method, const char* path, const char* jsonBo
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setReuse(false);
   http.addHeader("Connection", "close");
-  http.addHeader("User-Agent", "ESP32-Irrigation/1.0");
+  http.addHeader("Host", BACKEND_HOST);
+  http.addHeader("User-Agent", "ESP32-Irrigation/2.0");
   if (jsonBody != nullptr) {
     http.addHeader("Content-Type", "application/json");
     http.addHeader("x-device-key", API_DEVICE_KEY);
@@ -202,12 +185,8 @@ static bool httpRequest(const char* method, const char* path, const char* jsonBo
   }
 
   http.end();
-  if (USE_LOCAL_HTTP) {
-    plainClient.stop();
-  } else {
-    secureClient.stop();
-  }
-  delay(80);
+  client.stop();
+  delay(100);
 
   if (outCode) {
     *outCode = code;
@@ -220,52 +199,48 @@ static bool httpRequest(const char* method, const char* path, const char* jsonBo
   return code > 0;
 }
 
-static bool syncTimeNtp() {
+static void syncTimeNtp() {
   configTime(0, 0, "pool.ntp.org", "time.google.com");
   struct tm timeinfo;
-  for (int i = 0; i < 25; i++) {
+  for (int i = 0; i < 20; i++) {
     if (getLocalTime(&timeinfo)) {
-      Serial.printf("NTP OK: %04d-%02d-%02d %02d:%02d:%02d\n", timeinfo.tm_year + 1900,
-                    timeinfo.tm_mon + 1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min,
-                    timeinfo.tm_sec);
-      return true;
+      Serial.println("NTP time synced");
+      return;
     }
     delay(400);
   }
-  Serial.println("NTP failed — continuing (setInsecure TLS may still work)");
-  return false;
+  Serial.println("NTP skipped (setInsecure TLS still used)");
 }
 
 static bool testDns() {
-  if (USE_LOCAL_HTTP) {
-    Serial.printf("Local HTTP mode — backend %s:%u (no DNS needed)\n", BACKEND_HOST, BACKEND_PORT);
-    return true;
-  }
   IPAddress ip;
-  if (WiFi.hostByName(RENDER_HOST, ip)) {
-    Serial.printf("DNS OK: %s -> %s\n", RENDER_HOST, ip.toString().c_str());
+  if (WiFi.hostByName(BACKEND_HOST, ip)) {
+    Serial.printf("DNS OK: %s -> %s\n", BACKEND_HOST, ip.toString().c_str());
     return true;
   }
-  Serial.printf("DNS FAILED for %s — network may block Render; try USE_LOCAL_HTTP\n", RENDER_HOST);
+  Serial.printf("DNS FAILED for %s\n", BACKEND_HOST);
   return false;
 }
 
-static bool testBackendReachable() {
+static bool httpGetHealth() {
   int code = 0;
   String payload;
-  Serial.println("Probing GET /api/health ...");
   if (!httpRequest("GET", "/api/health", nullptr, &code, &payload)) {
     logHttpError("GET /api/health", code);
     return false;
   }
-  if (code != HTTP_CODE_OK) {
-    logHttpError("GET /api/health", code);
-    if (payload.length() > 0 && payload.length() < 200) {
+  if (isCaptivePortal(code, payload)) {
+    logCaptivePortalHint();
+    if (payload.length() < 180) {
       Serial.printf("body=%s\n", payload.c_str());
     }
     return false;
   }
-  Serial.printf("Backend reachable: %s\n", payload.c_str());
+  if (code != HTTP_CODE_OK) {
+    logHttpError("GET /api/health", code);
+    return false;
+  }
+  Serial.printf("Backend OK: %s\n", payload.c_str());
   lastServerOkMs = millis();
   return true;
 }
@@ -277,8 +252,15 @@ static bool httpGetStatus(bool* pumpOnOut) {
     logHttpError("GET /api/status", code);
     return false;
   }
+  if (isCaptivePortal(code, payload)) {
+    logCaptivePortalHint();
+    return false;
+  }
   if (code != HTTP_CODE_OK) {
     logHttpError("GET /api/status", code);
+    if (payload.length() > 0 && payload.length() < 160) {
+      Serial.printf("body=%s\n", payload.c_str());
+    }
     return false;
   }
 
@@ -308,6 +290,10 @@ static bool httpPostSensor(int sensorRaw) {
     logHttpError("POST /api/sensor", code);
     return false;
   }
+  if (isCaptivePortal(code, payload)) {
+    logCaptivePortalHint();
+    return false;
+  }
   if (code == HTTP_CODE_OK || code == 201) {
     lastServerOkMs = millis();
     return true;
@@ -315,22 +301,10 @@ static bool httpPostSensor(int sensorRaw) {
 
   logHttpError("POST /api/sensor", code);
   if (code == 401) {
-    Serial.println("Hint: set API_DEVICE_KEY = Render ESP32_API_KEY");
+    Serial.println("Hint: API_DEVICE_KEY must match Render ESP32_API_KEY");
   }
-  if (payload.length() > 0 && payload.length() < 200) {
+  if (payload.length() > 0 && payload.length() < 160) {
     Serial.printf("body=%s\n", payload.c_str());
-  }
-  return false;
-}
-
-static bool postSensorWithRetries(int sensorRaw) {
-  for (int attempt = 1; attempt <= HTTP_MAX_RETRIES; attempt++) {
-    if (httpPostSensor(sensorRaw)) {
-      return true;
-    }
-    if (attempt < HTTP_MAX_RETRIES) {
-      delay(800 * attempt);
-    }
   }
   return false;
 }
@@ -338,14 +312,30 @@ static bool postSensorWithRetries(int sensorRaw) {
 static bool getPumpWithRetries(bool* pumpOnOut) {
   for (int attempt = 1; attempt <= HTTP_MAX_RETRIES; attempt++) {
     if (!ensureWiFi()) {
-      delay(500);
+      delay(600);
       continue;
     }
     if (httpGetStatus(pumpOnOut)) {
       return true;
     }
     if (attempt < HTTP_MAX_RETRIES) {
-      delay(800 * attempt);
+      delay(1000 * attempt);
+    }
+  }
+  return false;
+}
+
+static bool postSensorWithRetries(int sensorRaw) {
+  for (int attempt = 1; attempt <= HTTP_MAX_RETRIES; attempt++) {
+    if (!ensureWiFi()) {
+      delay(600);
+      continue;
+    }
+    if (httpPostSensor(sensorRaw)) {
+      return true;
+    }
+    if (attempt < HTTP_MAX_RETRIES) {
+      delay(1000 * attempt);
     }
   }
   return false;
@@ -394,23 +384,20 @@ void setup() {
   Serial.println();
   Serial.print("Wi-Fi OK, IP: ");
   Serial.println(WiFi.localIP());
-  Serial.printf("Gateway: %s  DNS: 8.8.8.8\n", WiFi.gatewayIP().toString().c_str());
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
 
-  if (!USE_LOCAL_HTTP) {
-    syncTimeNtp();
-  }
+  syncTimeNtp();
   testDns();
 
-  Serial.printf("Backend %s://%s:%u — pump %lums, sensor %lums\n", USE_LOCAL_HTTP ? "http" : "https",
-                activeBackendHost(), activeBackendPort(), PUMP_POLL_MS, SENSOR_CYCLE_MS);
+  Serial.printf("Backend https://%s — pump %lums, sensor %lums\n", BACKEND_HOST, PUMP_POLL_MS,
+                SENSOR_CYCLE_MS);
 
+  Serial.println("Probing Render (cold start may take 30-60s)...");
   for (int i = 0; i < BOOT_SYNC_RETRIES; i++) {
-    if (testBackendReachable()) {
+    if (httpGetHealth()) {
       break;
     }
-    Serial.printf("Backend probe %d/%d failed — Render may be waking (wait 30-60s)...\n", i + 1,
-                  BOOT_SYNC_RETRIES);
+    Serial.printf("Health probe %d/%d failed, retrying...\n", i + 1, BOOT_SYNC_RETRIES);
     delay(5000);
   }
 
@@ -445,11 +432,11 @@ void loop() {
     lastPumpPollMs = now;
     if (!syncPumpFromServer()) {
       if (lastServerOkMs > 0 && (now - lastServerOkMs) > 90000) {
-        Serial.println("Server unreachable >90s — relay holds last state");
+        Serial.println("Render unreachable >90s — relay holds last state");
         lastServerOkMs = now;
       }
     }
   }
 
-  delay(20);
+  delay(30);
 }

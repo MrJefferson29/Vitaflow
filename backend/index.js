@@ -26,7 +26,9 @@ const {
 dotenv.config();
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 5000;
+const PUBLIC_API_URL = process.env.PUBLIC_API_URL || "https://irrigation-pzz4.onrender.com";
 const ESP32_API_KEY = process.env.ESP32_API_KEY || "change-me";
 
 const storePath = path.join(__dirname, "data", "store.json");
@@ -426,6 +428,7 @@ app.get("/api/health", (_req, res) => {
   const autoConfig = parseAutoIrrigateConfig();
   res.json({
     ok: true,
+    url: PUBLIC_API_URL,
     storage: isDbConnected() ? "mongodb" : "json",
     aiConfigured: isGeminiConfigured(),
     aiProvider: "gemini",
@@ -522,7 +525,7 @@ async function startServer() {
   await connectDb();
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Backend server listening on http://0.0.0.0:${PORT} (LAN: use this machine's IP)`);
-    console.log(`Reminders storage: ${isDbConnected() ? "MongoDB" : "data/store.json"}`);
+    console.log(`Public API URL: ${PUBLIC_API_URL}`);
     const gemini = getGeminiConfig();
     console.log(
       `Gemini chat: ${gemini.apiKey ? `configured (${gemini.model})` : "not configured — set GEMINI_API_KEY"}`,

@@ -130,7 +130,7 @@ export default function RemindersScreen() {
             <Text style={styles.statusText}>
               {health?.ok
                 ? `Connected · ${health.storage === "mongodb" ? "MongoDB" : "Local JSON storage"}`
-                : "Server offline — check EXPO_PUBLIC_API_URL"}
+                : "Cannot reach Render — check mobile data or EXPO_PUBLIC_API_URL"}
             </Text>
           </View>
           <Text style={styles.statusUrl}>{api.baseUrl}</Text>

@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: irrigation
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PUBLIC_API_URL
+        value: https://irrigation-pzz4.onrender.com
