@@ -321,6 +321,10 @@ async function generateAiReply(message) {
 app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
+app.use((req, _res, next) => {
+  console.log(`[req] ${req.method} ${req.path} from ${req.ip}`);
+  next();
+});
 
 app.get("/api/status", (_req, res) => {
   const store = readStore();
