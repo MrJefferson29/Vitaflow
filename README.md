@@ -22,16 +22,16 @@ AI Integration: Leverages the OpenAI API (gpt-4.1-mini) to provide crop care and
 Future-Ready: Includes pre-installed dependencies (like mongoose and jsonwebtoken) to allow for seamless future upgrades to cloud databases and user authentication.
 
 <p align="center">
-<img width="250" height="650" alt="Image" src="https://github.com/user-attachments/assets/db3e2355-0107-427e-9bae-89fb57e38a10" />
-<img width="250" height="650" alt="Image" src="https://github.com/user-attachments/assets/1da120e9-680f-435e-a14f-24f68b638ad5" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/c045a250-3c29-41f4-ab77-c653d33e3410" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/9706fe57-5cd2-4c0d-9600-81fb177208f3" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/4608fd8b-7a1d-4f0d-b7b3-28b190b6869b" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/a99fca02-2ea0-44f1-b98e-86e85190e569" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/e0e13a2e-8e4c-460b-8d36-e79589f3a0b2" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/c25feb09-a829-4667-9bb7-7ffd2f8e1b23" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/c008a203-fed2-49ae-9a49-a1152199b740" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/4405d9b0-899c-4514-90d3-d66059eed946" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/d502efb8-32ee-443d-808a-1c7720375730" />
-<img width="255" height="650" alt="Image" src="https://github.com/user-attachments/assets/7e93b8ec-4047-49c3-ac37-566d1a21417e" />
+<img width="250" height="600" alt="Image" src="https://github.com/user-attachments/assets/db3e2355-0107-427e-9bae-89fb57e38a10" />
+<img width="250" height="600" alt="Image" src="https://github.com/user-attachments/assets/1da120e9-680f-435e-a14f-24f68b638ad5" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/c045a250-3c29-41f4-ab77-c653d33e3410" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/9706fe57-5cd2-4c0d-9600-81fb177208f3" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/4608fd8b-7a1d-4f0d-b7b3-28b190b6869b" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/a99fca02-2ea0-44f1-b98e-86e85190e569" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/e0e13a2e-8e4c-460b-8d36-e79589f3a0b2" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/c25feb09-a829-4667-9bb7-7ffd2f8e1b23" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/c008a203-fed2-49ae-9a49-a1152199b740" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/4405d9b0-899c-4514-90d3-d66059eed946" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/d502efb8-32ee-443d-808a-1c7720375730" />
+<img width="255" height="600" alt="Image" src="https://github.com/user-attachments/assets/7e93b8ec-4047-49c3-ac37-566d1a21417e" />
 </p>
