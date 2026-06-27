@@ -4,7 +4,6 @@ function isSensorRawInverted() {
   return String(process.env.SENSOR_ADC_INVERT ?? "false").toLowerCase() === "true";
 }
 
-/** Accept number or numeric string from ESP32 JSON. */
 function coerceSensorRaw(raw) {
   if (typeof raw === "number" && Number.isFinite(raw)) {
     return Math.round(raw);
@@ -29,7 +28,6 @@ function normalizeSensorRaw(sensorRaw) {
   return coerced;
 }
 
-/** Higher ADC = drier (typical capacitive probe). 100% = wet. */
 function moisturePercentFromSensorRaw(sensorRaw) {
   const clamped = Math.max(0, Math.min(ADC_MAX, sensorRaw));
   return Math.round(((ADC_MAX - clamped) / ADC_MAX) * 100);

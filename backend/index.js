@@ -69,7 +69,6 @@ function ensureStoreFile() {
   }
 }
 
-/** Atomic-ish write: full JSON to temp file, then replace main file (avoids half-written store.json). */
 function writeStoreRaw(data) {
   const tmpPath = `${storePath}.tmp`;
   const payload = JSON.stringify(data, null, 2);
@@ -170,7 +169,6 @@ function writeStore(next) {
   writeStoreRaw(next);
 }
 
-/** Update only the given fields so sensor posts never clobber pumpOn from a stale full-store read. */
 function patchStoreFields(fields) {
   const store = readStore();
   if (fields.moistureLevel !== undefined) {

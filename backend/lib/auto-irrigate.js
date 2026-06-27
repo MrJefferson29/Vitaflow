@@ -27,10 +27,7 @@ function snoozeAutoUntil() {
   return new Date(Date.now() + MANUAL_SNOOZE_MS).toISOString();
 }
 
-/**
- * Hysteresis: turn pump ON below min, OFF above max.
- * Respects manual OFF snooze for 90 minutes when user stops auto irrigation.
- */
+
 function resolvePumpFromAuto(store, moistureLevel) {
   const config = parseAutoIrrigateConfig();
   const currentPumpOn = Boolean(store.pumpOn);

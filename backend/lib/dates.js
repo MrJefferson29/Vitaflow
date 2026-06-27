@@ -1,4 +1,3 @@
-/** Parse due date from ISO string or "YYYY-MM-DD HH:mm" (works on all JS engines). */
 function parseDueDate(raw) {
   if (raw == null || raw === "") {
     return null;

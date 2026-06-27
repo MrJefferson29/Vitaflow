@@ -1,12 +1,3 @@
-/*
- * Smart Irrigation — ESP32 HTTPS client for Render.
- *
- *   GET  /api/health  → connectivity probe
- *   GET  /api/status  → pumpOn → relay
- *   POST /api/sensor  → { sensorRaw } + x-device-key
- *
- * API_DEVICE_KEY must match ESP32_API_KEY on Render.
- */
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -14,16 +5,13 @@
 #include <WiFiClientSecure.h>
 #include <time.h>
 
-// ----- Wi-Fi -----
 static const char* WIFI_SSID = "Amana";
 static const char* WIFI_PASSWORD = "";
 
-// ----- Render backend (HTTPS only — never use plain HTTP on mobile hotspots) -----
 static const char* BACKEND_HOST = "irrigation-pzz4.onrender.com";
 static const uint16_t BACKEND_PORT = 443;
 static const char* API_DEVICE_KEY = "change-me";
 
-// ----- Hardware -----
 static const int SENSOR_PIN = 34;
 static const int RELAY_PIN = 25;
 static const bool PUMP_ACTIVE_LOW = true;
