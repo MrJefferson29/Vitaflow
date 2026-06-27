@@ -1,7 +1,7 @@
 <h1>Project Overview</h1>
 The Smart Irrigation System is an IoT-based prototype designed for small-scale farming and agricultural demonstrations. It operates entirely over a Local Area Network (LAN), eliminating the need for paid cloud platforms. The system connects an ESP32 microcontroller, a local Node.js backend server, and an Expo mobile application on the same Wi-Fi network.
 
-Core Architecture & Data Flow
+<h4>Core Architecture & Data Flow</h4>
 The system is divided into three distinct layers:
 
 Hardware Layer (ESP32): Reads raw analog data from a capacitive soil moisture sensor on GPIO34 (12-bit ADC, where higher values indicate drier soil) and controls a water pump relay on GPIO26. It pushes sensor data to the server every 1.5 seconds and pulls pump status updates every 400 ms.
